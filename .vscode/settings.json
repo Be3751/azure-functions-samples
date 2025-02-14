@@ -1,7 +1,10 @@
 {
-    "azureFunctions.deploySubpath": "go/hello-world",
-    "azureFunctions.projectLanguage": "Custom",
+    "azureFunctions.deploySubpath": "python/durable-functions",
+    "azureFunctions.projectLanguage": "Python",
     "azureFunctions.projectRuntime": "~4",
     "debug.internalConsoleOptions": "neverOpen",
-    "azureFunctions.projectSubpath": "go/hello-world"
+    "azureFunctions.projectSubpath": "python/durable-functions",
+    "azureFunctions.scmDoBuildDuringDeployment": true,
+    "azureFunctions.pythonVenv": ".venv",
+    "azureFunctions.projectLanguageModel": 2
 }
