@@ -3,26 +3,18 @@ import os
 import azure.functions as func
 import azure.durable_functions as df
 from azure.identity import DefaultAzureCredential
-from azure.data.tables import TableServiceClient
-from azure.search.documents import SearchClient
+from azure.data.tables import TableServiceClient, TableEntity
 from dotenv import load_dotenv
 
-from batch_metadata_mapping import find_index_documents, upload_documents
+from batch_metadata_mapping import find_documents, upload_documents
 
 myApp = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 load_dotenv()
 STORAGE_ACCOUNT_NAME = os.getenv("STORAGE_ACCOUNT_NAME")
 TABLE_NAME = os.getenv("TABLE_NAME")
-SEARCH_SERVICE_NAME = os.getenv("SEARCH_SERVICE_NAME")
-SEARCH_INDEX_NAME = os.getenv("SEARCH_INDEX_NAME")
 
 credential = DefaultAzureCredential()
-search_client = SearchClient(
-    f"https://{SEARCH_SERVICE_NAME}.search.windows.net",
-    SEARCH_INDEX_NAME, 
-    credential=credential
-)
 table_service = TableServiceClient(
     endpoint=f"https://{STORAGE_ACCOUNT_NAME}.table.core.windows.net",
     credential=credential
@@ -43,24 +35,40 @@ def metadata_mapping(context):
     client = table_service.get_table_client(TABLE_NAME)
 
     results = []
-    try:
-        pages = client.list_entities(results_per_page=count_per_page)
-        for page in pages.by_page():
-            res = yield context.call_activity("process_entity", page, results)
+    pages = client.list_entities(results_per_page=count_per_page)
+    for page in pages.by_page():
+        for tbl_entity in page:
+            res = yield context.call_activity("process_entity", tbl_entity)
             results.append(res)
-    finally:
-        table_service.close()
+    
     return results
 
 # Activity
-@myApp.activity_trigger(input_name="data")
-def process_entity(data):
-    entity = data["entity"]
-    results = data["results"]
-
-    file_name = entity["file_name"]
-    docs = find_index_documents(file_name)
+@myApp.activity_trigger(input_name="input")
+def process_entity(input: dict)->dict:
+    tbl_entity = TableEntity(**input)
+    file_path = str(tbl_entity["file_path"])
+    try:
+        docs = find_documents(file_path)
+    except Exception as e:
+        raise Exception(f"Error finding documents with file_path: {file_path}, original error: {e}") from e
 
     list_index_key = [doc["indexKey"] for doc in docs]
-    result = upload_documents(list_index_key, entity)
-    results.extend(result)
+    try:
+        results = upload_documents(list_index_key, tbl_entity)
+    except Exception as e:
+        raise Exception(f"Error uploading documents with list_index_key: {list_index_key}, original error: {e}") from e
+    
+    cnt_succeeded = 0
+    serialized_results = []
+    for res in results:
+        serialized_results.append(res.as_dict())
+        if res.succeeded:
+            cnt_succeeded += 1
+                                  
+    return {
+        "number_of_results": len(serialized_results),
+        "number_of_succeeded": cnt_succeeded,
+        "number_of_failed": len(serialized_results) - cnt_succeeded,
+        "results": serialized_results
+    }

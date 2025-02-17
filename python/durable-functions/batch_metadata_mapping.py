@@ -24,7 +24,8 @@ table_service = TableServiceClient(
     credential=credential
 )
 
-def find_index_documents(file_name):
+def find_documents(file_name: str):
+    print(f"Finding documents with file_name: {file_name}")
     filter_expr = f"search.ismatch('{file_name}', 'file_name')"
     results = search_client.search(
         search_text="*",
@@ -39,7 +40,27 @@ def find_index_documents(file_name):
 
     return matched_results
 
-def upload_documents(list_index_key: list[str], entity: TableEntity):
+def find_documents(file_path: str)->list[dict]:
+    base_path = f"https://{STORAGE_ACCOUNT_NAME}.blob.core.windows.net"
+    target_file_path = base_path + file_path
+
+    filter_expr = f"search.ismatch('{target_file_path}', 'file_path')"
+    results = search_client.search(
+        search_text="*",
+        filter=filter_expr,
+        select=["indexKey", "file_path", "file_name"],
+    )
+
+    matched_results = []
+    for result in results:
+        if result["file_path"] == target_file_path:
+            matched_results.append(result)
+        else:
+            print(f"file_path saved in Table Entity: {target_file_path} does not match {result['file_path']}")
+    print(f"Found {len(matched_results)} documents with file_path: {file_path}")
+    return matched_results
+
+def upload_documents(list_index_key: list[str], entity: TableEntity)->list[IndexingResult]:
     documents = [
         {
             "indexKey": index_key,
@@ -54,11 +75,17 @@ def upload_documents(list_index_key: list[str], entity: TableEntity):
         }
         for index_key in list_index_key
     ]
-    return search_client.merge_or_upload_documents(documents=documents)
+    if len(documents) == 0:
+        print("No documents to upload")
+        return []
+    
+    res = search_client.merge_or_upload_documents(documents=documents)
+    print(f"Uploaded {len(documents)} documents: {documents}")
+    return res
 
 def process_entity(entity: TableEntity, results: list[IndexingResult]):
     file_name = entity["file_name"]
-    docs = find_index_documents(file_name)
+    docs = find_documents(file_name)
 
     list_index_key = [doc["indexKey"] for doc in docs]
     result = upload_documents(list_index_key, entity)
